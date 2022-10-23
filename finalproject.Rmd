@@ -1,0 +1,385 @@
+---
+title: "Final Project"
+subtitle: "Section 5"
+author: "Ella Morrow"
+date: "Due: Friday, December 18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, error = TRUE)
+# knitr::opts_chunk$set(eval = FALSE)
+library(dplyr) 
+library(readr)
+library(ggplot2)
+library(broom)
+library(lubridate)
+library(ggmosaic)
+library(GGally)
+source('ggavplot.R')
+# add library statements for other packages you may need
+```
+
+
+## Step 1 (Load Data)
+
+Use the code chunk provided below to read your data set into R. *You should use the same dataset you used in HW2--HW5.* Then, perform any transformations and/or filtering that you will need for your regression models. 
+
+```{r load-data, message=FALSE}
+#covid <- read_csv("covid_behaviors_US.csv", guess_max = 14000)
+
+covid <- read.csv("covid_behaviors_US.csv")
+
+covid <- covid  %>% 
+  mutate(across(starts_with("i12_health"), ~as.numeric(factor(.,c('Not at all','Rarely','Sometimes','Frequently','Always'))),.names = "{col}_N")) %>% 
+  mutate(score = i12_health_1_N+i12_health_2_N+i12_health_3_N+i12_health_4_N+i12_health_5_N+i12_health_6_N+i12_health_7_N+i12_health_8_N+i12_health_11_N+i12_health_12_N+i12_health_13_N+i12_health_14_N+i12_health_15_N+i12_health_16_N+i12_health_17_N+i12_health_18_N+i12_health_19_N+i12_health_20_N) 
+
+covid <- covid %>%
+  left_join(data.frame(state.name, state.region, state.division), 
+            by = c("region" = "state.name"))
+
+covid <- covid %>% 
+  mutate(datetime = lubridate::dmy_hm(endtime)) %>% #R will recognize datetime as a date -- you can summarize with min and max
+  mutate(month = factor(lubridate::month(datetime))) %>% #creates month variable that indicates the month of the survey response
+  mutate(week = factor(lubridate::epiweek(datetime))) #creates week variable that indicates the week of the year of the survey response
+
+covid <- covid %>% mutate(scared = recode(WCRV_4, `I am very scared that I will contract the Coronavirus (COVID-19)` = "Very", `I am fairly scared that I will contract the Coronavirus (COVID-19)` = "Fairly", `I am not very scared that I will contract the Coronavirus (COVID-19)` = "Not very", `I am not at all scared that I will contract the Coronavirus (COVID-19)` = "Not at all"))
+
+covid <- covid %>% mutate(scared = factor(scared, levels=c("Not at all", "Not very", "Fairly", "Very")))
+
+covid <- covid %>% mutate(highscore = score >= 60)
+
+covid <- covid %>% mutate(ageCat = cut(age, 4))
+
+```
+
+
+
+## Step 2 (Add Variables to Linear Regression Model)
+
+Consider your "best" multiple linear regression model from HW3 and think about at least two additional explanatory variables that you would like to add to that model. Fit this larger model. 
+
+```{r fit-larger-linear-model}
+covid_cc <- covid %>%
+  filter(!is.na(scared))
+
+lm.mod.full <- covid_cc %>% with(lm(score ~ age * gender + month + scared))
+
+```
+
+
+
+## Step 3 (Hypothesis Testing for Linear Regression Coefficients)
+
+Considering this new, larger multiple linear regression model, use hypothesis testing for each individual slope coefficient to consider the evidence you have in support of including those variables in the model. Consider whether some of these variables may not have REAL relationships with the outcome after accounting for the other variables. 
+
+```{r hypothesis-testing-larger-linear-model}
+tidy(lm.mod.full)
+
+```
+
+
+## Step 4 (Compare Nested Linear Models)
+
+Now fit a model without some of those variables in `lm.mod.full` that may not have REAL relationships after accounting for the other variables. Use a nested hypothesis test to compare `lm.mod.full` with a smaller model, `lm.mod.sub`. The null hypothesis is that the smaller model is correct. Consider whether you have evidence to reject that hypothesis in favor of the full model (`lm.mod.full`). 
+
+```{r compare-nested-linear-models}
+lm.mod.sub <- covid_cc %>% with(lm(score ~ age+gender+month+scared))
+                                
+anova(lm.mod.full, lm.mod.sub)
+
+```
+
+
+
+## Step 5 (Select a Final Linear Regression Model)
+
+Using the tools available to you (residual plots, R-squared, adjusted R-squared, standard deviation of residuals, hypothesis testing, causal diagrams), fit a variety of models and choose one final model. Be systematic in your process as you'll need to describe your model selection process and justify your final model. (Note: for mastery of the Inference > Model Selection objective (see Final Grading Rubric), you must use at least 3 of these model selection tools.)
+
+```{r compare-linear-models}
+lm.mod.ageCat <- covid %>% with(lm(score ~ ageCat + gender + month + scared))
+
+lm.mod.noscared <- covid %>% with(lm(score ~ age+gender + month))
+
+lm.mod.nomonth <- covid %>% with(lm(score ~ age + gender + scared))
+
+lm.mod.nogender <- covid %>% with(lm(score ~ age + month + scared))
+
+lm.mod.state  <-covid %>% with(lm(score ~ age+gender + state.region + scared))
+
+glance(lm.mod.state)
+glance(lm.mod.full)
+
+```
+
+
+
+```{r final-linear-model}
+final.lm.mod <- covid %>% with(lm(score ~ age * gender + month + scared))
+
+tidy(final.lm.mod) #you'll need these estimates
+confint(final.lm.mod) #you'll need these confidence intervals
+glance(final.lm.mod) #you'll need these model evaluation criteria
+```
+
+## Step 6 (Add Variables to Logistic Regression Model)
+
+Now consider your multiple logistic regression model from HW4 and think about at least two additional explanatory variables that you would like to add to that model. Fit this larger model. 
+
+```{r fit-larger-logistic-model}
+glm.mod.full <-  covid_cc %>% 
+  with(glm(highscore ~ age + gender + month + scared, family = binomial))
+
+```
+
+
+## Step 7 (Hypothesis Testing for Logistic Regression Coefficients)
+
+Considering this new, larger multiple logistic regression model, use hypothesis testing for each individual slope coefficient to consider the evidence you have in support of including those variables in the model. 
+
+```{r hypothesis-testing-larger-logistic-model}
+tidy(glm.mod.full)
+confint(glm.mod.full) %>% exp()
+```
+
+
+
+## Question 8 (Compare Nested Logistic Models)
+
+Now fit a model without some of those variables in `glm.mod.full` that may not have REAL relationships after accounting for the other variables. Use a nested hypothesis test to compare `glm.mod.full` with a smaller model, `glm.mod.sub`. The null hypothesis is that the smaller model is correct. Consider whether you have evidence to reject that hypothesis in favor of the full model (`glm.mod.full`). 
+
+```{r compare-nested-logistic-models}
+glm.mod.sub <- covid_cc %>%
+  with(glm(highscore ~  age + gender + scared, family = binomial))
+## make sure to filter missing values for all variables included in larger model
+
+anova(glm.mod.full, glm.mod.sub, test='LRT')
+
+```
+
+
+
+
+## Question 9 (Select a Final Logistic Regression Model)
+
+Using the tools available to you (hypothesis testing, causal diagrams, predicted probability boxplots, false positive and false negative rates, accuracy), fit a variety of models and choose one final model. Be systematic in your process as you'll need to describe your model selection process and justify your final model. (Note: for mastery of the Inference > Model Selection objective (see Final Grading Rubric), you must use at least 3 of these model selection tools.)
+
+```{r compare-logistic-models}
+glm.mod.state <- covid %>% with(glm(highscore ~ age + gender + scared + state.region, family = binomial))
+
+glm.mod.full %>%
+    augment(type.predict = "response") %>%
+    ggplot(aes(y = .fitted, x = factor(highscore))) + 
+    geom_boxplot() + 
+    geom_hline(yintercept = 0.8, color = "red") +
+    ylab("Predicted probability of a high preventative score") + 
+    xlab("High Preventative Score") + 
+    theme_classic()
+threshold <- 0.8
+augment(glm.mod.full, type.predict ='response') %>%
+  mutate(predictScore = .fitted > threshold) %>%
+  count(highscore, predictScore) %>%
+  mutate(correct = predictScore == (highscore == 1)) %>%
+  group_by(highscore) %>% 
+  mutate(relfreq= n/sum(n))
+
+meanfull <- glm.mod.full %>%
+  augment(type.predict = "response")
+meanfull  %>%
+  group_by(highscore) %>%
+  summarize(mean_probability =  mean(.fitted, na.rm = TRUE),
+            median_probability = median(.fitted, na.rm = TRUE))
+
+glm.mod.state %>%
+    augment(type.predict = "response") %>%
+    ggplot(aes(y = .fitted, x = factor(highscore))) + 
+    geom_boxplot() + 
+    geom_hline(yintercept = 0.8, color = "red") +
+    ylab("Predicted probability of a high preventative score") + 
+    xlab("High Preventative Score") + 
+    theme_classic()
+threshold <- 0.8
+augment(glm.mod.state, type.predict ='response') %>%
+  mutate(predictScore = .fitted > threshold) %>%
+  count(highscore, predictScore) %>%
+  mutate(correct = predictScore == (highscore == 1)) %>%
+  group_by(highscore) %>% 
+  mutate(relfreq= n/sum(n))
+
+meanstate <- glm.mod.state %>%
+  augment(type.predict = "response")
+meanstate  %>%
+  group_by(highscore) %>%
+  summarize(mean_probability =  mean(.fitted, na.rm = TRUE),
+            median_probability = median(.fitted, na.rm = TRUE))
+```
+
+```{r final-logistic-model}
+final.glm.mod <- glm.mod.full#REPLACE THIS WITH CODE to fit final model
+
+coef(final.glm.mod) %>% exp() #you'll need these estimates
+confint(final.glm.mod) %>% exp() #you'll need these confidence intervals
+
+augment(final.glm.mod, type.predict = 'response') %>%
+  ggplot(aes(x = factor(highscore), y = .fitted)) + #replace ... with outcome variable name
+  geom_boxplot() +
+  geom_hline(yintercept = 0.8, color = "red") +
+  labs(x = 'Outcome', y = 'Predicted Probability of Outcome') + 
+  theme_classic()
+```
+
+
+## Step 2 (Update Multiple Linear Regression Section)
+
+### Visualization
+
+Create a visualization that helps address your first research question involving a quantitative outcome. This visualization should include your outcome variable as well as the two explanatory variables that are most relevant to your research question. You do not need to (and should not) include all variables that are involved in your final linear regression model in this visualization; just focus on the primary variables of interest. (If you feel that two visualizations would be more effective, that is ok too.)
+
+```{r visualize-RQ1}
+covid %>%
+  filter(!is.na(scared)) %>%
+  ggplot(aes(x = age, y = score, color = gender)) +
+  geom_point(alpha = 0.2)+
+  geom_smooth()+
+  labs(x = "Age", y = "Covid-19 Preventative Score", color = "Gender")+
+  theme_minimal()
+
+# (and numerical summaries, if desired)
+
+covid %>%
+  filter(!is.na(scared)) %>%
+  summarize(mean(score), median(score), sd(score), mean(age), median(age), sd(age), cor(score, age)) 
+
+covid %>%
+  filter(!is.na(scared)) %>%
+    group_by(gender) %>%
+    summarize(
+        median_score = median(score),
+        mean_score = mean(score),
+        sd_score = sd(score))
+
+
+```
+
+Save this visual and upload it (right click - copy and paste) to your **Final Report Google Doc**. Then, in a brief paragraph, thoroughly describe what information you gain from that visualization. You may use numerical summaries in your paragraph to fully describe your visualization. 
+
+
+### Fitted Model
+
+Use the code chunk below to print out the estimates, standard errors, p-values, and 95% confidence intervals for each of the coefficients in your final model.
+
+```{r final-fitted-linear-model}
+#you should have fit final.lm.mod in Part 1
+
+tidy(final.lm.mod) # estimates, standard errors, p-values
+confint(final.lm.mod) # confidence intervals
+```
+
+Then, add these estimates, standard errors, and confidence intervals to the table in the *Fitted Model* section of your Final Report Google Doc. 
+
+### Model Evaluation
+
+Use the code chunk below to check whether your final linear regression model meets all linear model conditions and to assess the "goodness" of your final model. 
+
+```{r evaluate-final-linear-model}
+# REPLACE THIS WITH CODE to check conditions
+
+augment(final.lm.mod, data = covid_cc) %>%
+    ggplot(aes(x = .fitted, y = .resid)) +
+    geom_point() +
+    geom_smooth(se = FALSE) +
+    geom_hline(yintercept = 0, color = "red") +
+    labs(x = "Fitted values (predicted values)", y = "Residuals") +
+    theme_minimal()
+
+augment(final.lm.mod, data = covid_cc) %>%
+    ggplot(aes(x = .resid)) +
+    geom_histogram() +
+    geom_vline(xintercept = 26.28, color = "red") +
+    geom_vline(xintercept = -26.28, color = "red") +
+    labs(x = "Fitted values (predicted values)", y = "Residuals") +
+    theme_minimal()
+
+glance(final.lm.mod) # to evaluate goodness
+```
+
+Add any graphical evidence and numerical evidence that you produced above to your Final Report Google Doc. Then, in paragraph form, describe what you've learned about model conditions (straight enough, equal spread, no extreme outliers) and goodness (R-squared, residual standard error, redundancy), putting your conclusions in context.
+
+
+
+## Step 3 (Update Multiple Logistic Regression Section)
+
+### Visualization
+
+Create a visualization that helps address your second research question involving a binary outcome. This visualization should include your outcome variable as well as the two explanatory variables that are most relevant to your research question. As above, you do not need to (and should not) include all variables that are involved in your final logistic regression model in this visualization; just focus on the primary variables of interest. (If you feel that two visualizations would be more effective, that is ok too.)
+
+```{r visualize-RQ2}
+# REPLACE THIS WITH CODE for a plot
+covid %>%
+  filter(!is.na(scared)) %>%
+  mutate(highscore = factor(highscore)) %>%
+  ggplot(aes(x = highscore, y = age)) +
+  geom_boxplot() +
+  facet_wrap(.~gender)+
+  xlab("High Covid-19 Preventative Score") +
+  theme_minimal()
+
+covid %>%
+  filter(!is.na(scared)) %>%
+  mutate(highscore = factor(highscore)) %>%
+  ggplot() + 
+  geom_mosaic(aes(x = product(highscore, gender), fill = highscore))+
+  labs(y = "High Covid-19 Preventative Score", fill = "High Covid-19 Preventative Score")+
+  theme_minimal()
+
+# (and numerical summaries, if desired)
+
+
+```
+
+Save this visual and upload it (right click -- copy and paste) to your **Final Report Google Doc**. Then, in a brief paragraph, thoroughly describe what information you gain from that visualization. You may use numerical summaries in your paragraph to fully describe your visualization. 
+
+
+### Fitted Model
+
+Use the code chunk below to print out the exponentiated estimates, p-values, and 95% confidence intervals for each of the coefficients in your final model. 
+
+```{r final-fitted-logistic-model}
+# should have fit final.glm.mod in Part 1
+
+coef(final.glm.mod) %>% exp() # exp estimates
+confint(final.glm.mod) %>% exp() # confidence intervals
+tidy(final.glm.mod) # p-values
+
+levels(state.region)
+```
+
+Then, add these estimates, standard errors, and confidence intervals to the table in the *Fitted Model* section of your Final Report Google Doc. 
+
+
+### Model Evaluation
+
+Use the code chunk below to assess the "goodness" of your final model. 
+
+```{r evaluate-final-logistic-model}
+augment(final.glm.mod, type.predict = 'response') %>%
+  ggplot(aes(x = factor(highscore), y = .fitted)) + #replace ... with outcome variable name
+  geom_boxplot() +
+  geom_hline(yintercept = 0.8, color = "red")+
+  labs(x = 'Outcome', y = 'Predicted Probability of Outcome') + 
+  theme_classic()
+
+# evaluate goodness
+threshold <- 0.8 # REPLACE with chosen threshold
+
+augment(final.glm.mod, type.predict = 'response') %>%  
+  mutate(PredictOutcome = .fitted > threshold) %>%
+  count(highscore, PredictOutcome) %>% #replace ... with outcome variable name
+  group_by(highscore) %>% #replace ... with outcome variable name
+  mutate(prop = n/sum(n))
+
+```
+
+Add any graphical evidence and numerical evidence that you produced above to your Final Report Google Doc. Then, in paragraph form, describe what you've learned about model goodness (accuracy, sensitivity, specificity, false positive rate, false negative rate), putting your conclusions in context.
+
+
